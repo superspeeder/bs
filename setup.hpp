@@ -2,6 +2,8 @@
 #include <vulkan/vulkan.hpp>
 #include "vk_mem_alloc.h"
 
+#include <shaderc/shaderc.hpp>
+
 #include <vector>
 #include <functional>
 #include <array>
@@ -32,6 +34,11 @@ concept dev_destruct = requires(const T& v, vk::Device dev) {
     dev.destroy(v);
 };
 
+constexpr vk::ComponentMapping STANDARD_COMPONENT_MAPPING = vk::ComponentMapping{vk::ComponentSwizzle::eR, vk::ComponentSwizzle::eG, vk::ComponentSwizzle::eB, vk::ComponentSwizzle::eA};
+constexpr vk::ImageSubresourceRange STANDARD_ISR = vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
+constexpr vk::ImageSubresource STANDARD_IMAGE_SUBRESOURCE = vk::ImageSubresource(vk::ImageAspectFlagBits::eColor, 0, 0);
+constexpr vk::ImageSubresourceLayers STANDARD_IMAGE_SUBRESOURCE_LAYERS = vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1);
+
 class GraphicsContext {
   public:
     GraphicsContext(vk::Instance instance, vk::PhysicalDevice gpu);
@@ -49,9 +56,9 @@ class GraphicsContext {
 
     void runCommands(const std::function<void(const vk::CommandBuffer& cmd)>& f);
 
-    vk::CommandBuffer allocateCommandBuffer() const;
+    [[nodiscard]] vk::CommandBuffer allocateCommandBuffer() const;
 
-    vk::Fence createFence() const;
+    [[nodiscard]] vk::Fence createFence() const;
 
     void waitForFence(vk::Fence fence) const;
 
@@ -88,6 +95,17 @@ class GraphicsContext {
     void saveBufferImage(const std::string& path, const Buffer& bufferImage, int width, int height, int channels, int bpp) const;
 
     static void saveImage(const std::string& path, const void* data, int width, int height, int channels, int bpp);
+
+    [[nodiscard]] std::vector<uint32_t> compileShader(const std::string& path) const;
+    [[nodiscard]] std::vector<uint32_t> compileShader(const std::string& path, const std::string& entry_point) const;
+
+    [[nodiscard]] vk::ShaderModule buildShaderModule(const std::string& path) const;
+    [[nodiscard]] vk::ShaderModule buildShaderModule(const std::string& path, const std::string& entry_point) const;
+
+    [[nodiscard]] inline vk::Device getDevice() const noexcept { return m_Device; };
+
+    [[nodiscard]] vk::ImageView createImageView(const Image &image, vk::Format format) const;
+    [[nodiscard]] vk::Framebuffer createFramebuffer(vk::RenderPass rp, vk::ImageView iv, vk::Extent2D extent) const;
 
   private:
     vk::Instance m_Instance;

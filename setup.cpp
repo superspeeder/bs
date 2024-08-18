@@ -9,6 +9,22 @@
 
 #include <iostream>
 
+#include <fstream>
+
+std::string readFile(const std::string& path) {
+    std::ifstream f(path, std::ios::in | std::ios::ate);
+    auto pos = f.tellg();
+    f.seekg(0);
+    char* buf = new char[(size_t)pos + 1];
+    memset(buf, 0, (size_t)pos + 1);
+    f.read(buf, pos);
+    f.close();
+    std::string s = buf;
+    delete[] buf;
+
+    return s;
+}
+
 vk::Instance createInstance() {
     vk::ApplicationInfo appInfo{};
     appInfo.apiVersion = vk::ApiVersion13;
@@ -294,4 +310,53 @@ void GraphicsContext::saveBufferImage(const std::string &path, const Buffer &buf
 
 void GraphicsContext::saveImage(const std::string &path, const void *data, int width, int height, int channels, int bpp) {
     stbi_write_png(path.c_str(), width, height, channels, data, bpp);
+}
+
+std::vector<uint32_t> GraphicsContext::compileShader(const std::string &path) const {
+    shaderc::Compiler compiler;
+    shaderc::CompileOptions options;
+    std::string source = readFile(path);
+    options.SetOptimizationLevel(shaderc_optimization_level_performance);
+
+    auto res = compiler.CompileGlslToSpv(source, shaderc_glsl_infer_from_source, path.c_str(), options);
+    auto status = res.GetCompilationStatus();
+    if (status != shaderc_compilation_status_success) {
+        std::cerr << "Error compiling shader " << path << ": " << res.GetErrorMessage() << std::endl;
+        throw std::runtime_error("Error compiling shader");
+    }
+
+    return std::vector(res.cbegin(), res.cend()); // NOLINT(*-return-braced-init-list)
+}
+
+vk::ShaderModule GraphicsContext::buildShaderModule(const std::string &path) const {
+    auto spirv = compileShader(path);
+    return m_Device.createShaderModule(vk::ShaderModuleCreateInfo({}, spirv));
+}
+
+std::vector<uint32_t> GraphicsContext::compileShader(const std::string &path, const std::string &entry_point) const {
+    shaderc::Compiler compiler;
+    shaderc::CompileOptions options;
+    std::string source = readFile(path);
+    options.SetOptimizationLevel(shaderc_optimization_level_performance);
+
+    auto res = compiler.CompileGlslToSpv(source, shaderc_glsl_infer_from_source, path.c_str(), entry_point.c_str(), options);
+    if (res.GetCompilationStatus() != shaderc_compilation_status_success) {
+        std::cerr << "Error compiling shader " << path << ": " << res.GetErrorMessage() << std::endl;
+        throw std::runtime_error("Error compiling shader");
+    }
+
+    return std::vector(res.cbegin(), res.cend());
+}
+
+vk::ShaderModule GraphicsContext::buildShaderModule(const std::string &path, const std::string &entry_point) const {
+    auto spirv = compileShader(path, entry_point);
+    return m_Device.createShaderModule(vk::ShaderModuleCreateInfo({}, spirv));
+}
+
+vk::ImageView GraphicsContext::createImageView(const Image &image, vk::Format format) const {
+    return m_Device.createImageView(vk::ImageViewCreateInfo({}, image.image, vk::ImageViewType::e2D, format, STANDARD_COMPONENT_MAPPING, STANDARD_ISR));
+}
+
+vk::Framebuffer GraphicsContext::createFramebuffer(vk::RenderPass rp, vk::ImageView iv, vk::Extent2D extent) const {
+    return m_Device.createFramebuffer(vk::FramebufferCreateInfo({}, rp, iv, extent.width, extent.height, 1));
 }

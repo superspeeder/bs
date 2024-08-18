@@ -30,6 +30,96 @@ void sleep(int seconds) {
 
 #define IMAGE_SIZE 2048
 
+vk::RenderPass createRenderPass(GraphicsContext* gc) {
+
+    vk::AttachmentDescription colorAttachment = {{}, vk::Format::eR8G8B8A8Unorm, vk::SampleCountFlagBits::e1, vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore, vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferSrcOptimal};
+
+    vk::AttachmentReference colorAttachmentRef = {0, vk::ImageLayout::eColorAttachmentOptimal};
+    vk::SubpassDescription subpass = {{}, vk::PipelineBindPoint::eGraphics, {}, colorAttachmentRef, {}, nullptr, {}};
+
+    vk::SubpassDependency dep = {VK_SUBPASS_EXTERNAL, 0, vk::PipelineStageFlagBits::eColorAttachmentOutput, vk::PipelineStageFlagBits::eColorAttachmentOutput, vk::AccessFlagBits::eNone, vk::AccessFlagBits::eColorAttachmentWrite};
+
+    vk::RenderPassCreateInfo rpci{};
+    rpci.setAttachments(colorAttachment);
+    rpci.setSubpasses(subpass);
+    rpci.setDependencies(dep);
+
+    return gc->getDevice().createRenderPass(rpci);
+}
+
+vk::PipelineLayout createPipelineLayout(GraphicsContext* gc) {
+    vk::PipelineLayoutCreateInfo plci{};
+    return gc->getDevice().createPipelineLayout(plci);
+}
+
+vk::Pipeline createPipeline(GraphicsContext* gc, vk::PipelineLayout pipelineLayout, vk::RenderPass renderPass, vk::ShaderModule vert, vk::ShaderModule frag) {
+    std::vector<vk::PipelineShaderStageCreateInfo> stages = {
+        vk::PipelineShaderStageCreateInfo({}, vk::ShaderStageFlagBits::eVertex, vert, "main"),
+        vk::PipelineShaderStageCreateInfo({}, vk::ShaderStageFlagBits::eFragment, frag, "main"),
+    };
+
+    std::vector<vk::DynamicState> dynamicStates{};
+
+    vk::Viewport viewport{0.0f, 0.0f, (float)IMAGE_SIZE, (float)IMAGE_SIZE, 0.0f, 1.0f};
+    vk::Rect2D scissor{{0, 0}, {IMAGE_SIZE, IMAGE_SIZE}};
+
+    vk::PipelineVertexInputStateCreateInfo vertexInput{};
+    vk::PipelineInputAssemblyStateCreateInfo inputAssembly{};
+    inputAssembly.primitiveRestartEnable = false;
+    inputAssembly.topology = vk::PrimitiveTopology::eTriangleList;
+
+    vk::PipelineViewportStateCreateInfo viewportState{};
+    viewportState.setViewports(viewport).setScissors(scissor);
+
+    vk::PipelineRasterizationStateCreateInfo rasterizer{};
+    rasterizer.depthClampEnable = false;
+    rasterizer.rasterizerDiscardEnable = false;
+    rasterizer.polygonMode = vk::PolygonMode::eFill;
+    rasterizer.lineWidth = 1.0f;
+    rasterizer.depthBiasEnable = false;
+
+    vk::PipelineMultisampleStateCreateInfo multisampler{};
+    multisampler.sampleShadingEnable = false;
+    multisampler.rasterizationSamples = vk::SampleCountFlagBits::e1;
+
+    vk::PipelineColorBlendAttachmentState blendAttachment{};
+    blendAttachment.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
+    blendAttachment.blendEnable = true;
+    blendAttachment.srcColorBlendFactor = vk::BlendFactor::eSrcAlpha;
+    blendAttachment.dstColorBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha;
+    blendAttachment.colorBlendOp = vk::BlendOp::eAdd;
+    blendAttachment.srcAlphaBlendFactor = vk::BlendFactor::eOne;
+    blendAttachment.dstAlphaBlendFactor = vk::BlendFactor::eZero;
+    blendAttachment.colorBlendOp = vk::BlendOp::eAdd;
+
+    vk::PipelineColorBlendStateCreateInfo blendState{};
+    std::array<float, 4> blend_constants = {0.0f, 0.0f, 0.0f, 0.0f};
+    blendState.setBlendConstants(blend_constants);
+    blendState.setAttachments(blendAttachment);
+    blendState.logicOpEnable = false;
+    blendState.logicOp = vk::LogicOp::eCopy;
+
+    vk::PipelineDynamicStateCreateInfo dynamicState{};
+    dynamicState.setDynamicStates(dynamicStates);
+
+    vk::GraphicsPipelineCreateInfo gpci{};
+    gpci.setStages(stages);
+    gpci.pVertexInputState = &vertexInput;
+    gpci.pInputAssemblyState = &inputAssembly;
+    gpci.pViewportState = &viewportState;
+    gpci.pRasterizationState = &rasterizer;
+    gpci.pMultisampleState = &multisampler;
+    gpci.pDepthStencilState = nullptr;
+    gpci.pColorBlendState = &blendState;
+    gpci.pDynamicState = &dynamicState;
+
+    gpci.renderPass = renderPass;
+    gpci.layout = pipelineLayout;
+    gpci.subpass = 0;
+
+    return gc->getDevice().createGraphicsPipeline(nullptr, gpci).value;
+}
+
 void doGpuThings(int i, vk::Instance instance, vk::PhysicalDevice gpu) {
     // create a logical device
 
@@ -39,17 +129,17 @@ void doGpuThings(int i, vk::Instance instance, vk::PhysicalDevice gpu) {
     Image deviceImage = gc->createImageDevice(IMAGE_SIZE, IMAGE_SIZE, vk::Format::eR8G8B8A8Unorm, vk::ImageLayout::eUndefined, vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst, vk::ImageTiling::eOptimal);
     Buffer hostBuffer = gc->createBufferHost(IMAGE_SIZE * IMAGE_SIZE * 4, vk::BufferUsageFlagBits::eTransferDst);
 
-    gc->runCommands([&](const vk::CommandBuffer& cmd) {
-        vk::ImageMemoryBarrier imb1{};
-        imb1.oldLayout = vk::ImageLayout::eUndefined;
-        imb1.newLayout = vk::ImageLayout::eTransferDstOptimal;
-        imb1.srcAccessMask = vk::AccessFlagBits::eNone;
-        imb1.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
-        imb1.image = deviceImage.image;
-        imb1.subresourceRange = vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
-        cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eTransfer, {}, {}, {}, imb1);
+    vk::ShaderModule vertexShader = gc->buildShaderModule("shaders/main.vert");
+    vk::ShaderModule fragmentShader = gc->buildShaderModule("shaders/main.frag");
 
-        vk::ImageSubresourceRange range = vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
+    vk::RenderPass renderPass = createRenderPass(gc);
+    vk::PipelineLayout pipelineLayout = createPipelineLayout(gc);
+    vk::Pipeline pipeline = createPipeline(gc, pipelineLayout, renderPass, vertexShader, fragmentShader);
+
+    vk::ImageView imageView = gc->createImageView(deviceImage, vk::Format::eR8G8B8A8Unorm);
+    vk::Framebuffer framebuffer = gc->createFramebuffer(renderPass, imageView, {IMAGE_SIZE, IMAGE_SIZE});
+
+    gc->runCommands([&](const vk::CommandBuffer& cmd) {
         vk::ClearColorValue clearColor;
         switch (i) {
         case 0:
@@ -69,29 +159,24 @@ void doGpuThings(int i, vk::Instance instance, vk::PhysicalDevice gpu) {
             break;
         }
 
-        cmd.clearColorImage(deviceImage.image, vk::ImageLayout::eTransferDstOptimal, clearColor, range);
+        std::array<vk::ClearValue, 1> clearValues = {clearColor};
 
-        vk::ImageMemoryBarrier imb2{};
-        imb2.oldLayout = vk::ImageLayout::eTransferDstOptimal;
-        imb2.newLayout = vk::ImageLayout::eTransferSrcOptimal;
-        imb2.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
-        imb2.dstAccessMask = vk::AccessFlagBits::eTransferRead;
-        imb2.image = deviceImage.image;
-        imb2.subresourceRange = vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
+        cmd.beginRenderPass(vk::RenderPassBeginInfo(renderPass, framebuffer, vk::Rect2D({0, 0}, {IMAGE_SIZE, IMAGE_SIZE}), clearValues), vk::SubpassContents::eInline);
+        cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
+        cmd.draw(3, 1, 0, 0);
+        cmd.endRenderPass();
+    });
 
-        vk::ImageMemoryBarrier imb3{};
-        imb3.oldLayout = vk::ImageLayout::eUndefined;
-        imb3.newLayout = vk::ImageLayout::eTransferDstOptimal;
-        imb3.srcAccessMask = vk::AccessFlagBits::eNone;
-        imb3.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
-        imb3.image = hostImage.image;
-        imb3.subresourceRange = vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
+    gc->runCommands([&](const vk::CommandBuffer& cmd) {
+        vk::ImageMemoryBarrier imb{};
+        imb.oldLayout = vk::ImageLayout::eUndefined;
+        imb.newLayout = vk::ImageLayout::eTransferDstOptimal;
+        imb.srcAccessMask = vk::AccessFlagBits::eNone;
+        imb.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
+        imb.image = hostImage.image;
+        imb.subresourceRange = vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
 
-
-        std::vector<vk::ImageMemoryBarrier> imbs = {
-            imb2, imb3
-        };
-        cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eTransfer, {}, {}, {}, imbs);
+        cmd.pipelineBarrier(vk::PipelineStageFlagBits::eColorAttachmentOutput, vk::PipelineStageFlagBits::eTransfer, {}, {}, {}, imb);
 
         vk::ImageCopy region;
         region.srcOffset = vk::Offset3D{0, 0, 0};
@@ -132,6 +217,13 @@ void doGpuThings(int i, vk::Instance instance, vk::PhysicalDevice gpu) {
 
     // sleep(15);
 
+    gc->destroy(framebuffer);
+    gc->destroy(imageView);
+    gc->destroy(pipeline);
+    gc->destroy(pipelineLayout);
+    gc->destroy(renderPass);
+    gc->destroy(vertexShader);
+    gc->destroy(fragmentShader);
     gc->destroy(deviceImage);
     gc->destroy(hostImage);
     gc->destroy(hostBuffer);
