@@ -77,12 +77,17 @@ GraphicsContext::GraphicsContext(vk::Instance instance, vk::PhysicalDevice gpu) 
     m_GpuProperties = props.get<vk::PhysicalDeviceProperties2>();
     m_GpuPciInfo = props.get<vk::PhysicalDevicePCIBusInfoPropertiesEXT>();
 
+    std::cout << "Got properties" << std::endl;
+    std::cout << "Device Version: " << vk::apiVersionMajor(m_GpuProperties.properties.apiVersion) << '.' << vk::apiVersionMinor(m_GpuProperties.properties.apiVersion) << '.' << vk::apiVersionPatch(m_GpuProperties.properties.apiVersion) << std::endl;
+
     createDevice();
     std::cout << "Created device on " << m_GpuProperties.properties.deviceName.data() << " in PCI bus " << m_GpuPciInfo.pciBus << '\n';
 
     createAllocator();
+    std::cout << "created allocator" << std::endl;
 
     m_Pool = m_Device.createCommandPool(vk::CommandPoolCreateInfo(vk::CommandPoolCreateFlagBits::eResetCommandBuffer, 0));
+    std::cout << "created pool" << std::endl;
 }
 
 GraphicsContext::~GraphicsContext() {
@@ -94,13 +99,18 @@ GraphicsContext::~GraphicsContext() {
 }
 
 void GraphicsContext::createDevice() {
+    auto exts = m_Gpu.enumerateDeviceExtensionProperties();
+    for (const auto& e : exts) {
+        std::cout << e.extensionName << std::endl;
+    }
+
     std::vector<const char*> extensions = {
-        VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME,
-        VK_KHR_BIND_MEMORY_2_EXTENSION_NAME,
-        VK_KHR_MAINTENANCE_4_EXTENSION_NAME,
-        VK_KHR_MAINTENANCE_5_EXTENSION_NAME,
+//        VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME,
+//        VK_KHR_BIND_MEMORY_2_EXTENSION_NAME,
+//        VK_KHR_MAINTENANCE_4_EXTENSION_NAME,
+//        VK_KHR_MAINTENANCE_5_EXTENSION_NAME,
         VK_EXT_MEMORY_BUDGET_EXTENSION_NAME,
-        VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
+//        VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
         VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME,
     };
 
@@ -114,13 +124,26 @@ void GraphicsContext::createDevice() {
     std::vector<vk::DeviceQueueCreateInfo> dqcis{};
     dqcis.push_back(vk::DeviceQueueCreateInfo({}, 0, qp)); // we do a bit of assumptions
 
-    m_Device = m_Gpu.createDevice(vk::DeviceCreateInfo({}, dqcis, {}, extensions, nullptr, &features));
+    std::cout << "creating device," << std::endl;
+
+    auto dci_ = vk::DeviceCreateInfo({}, dqcis, {}, extensions, nullptr, &features);
+    VkDeviceCreateInfo dci = dci_;
+
+    VkDevice dev;
+    vk::Result res = (vk::Result)vkCreateDevice(m_Gpu, &dci, nullptr, &dev);
+
+    std::cout << "Res: " << vk::to_string(res) << std::endl;
+
+    if (res != vk::Result::eSuccess) sleep(60);
+
+    m_Device = dev;
+    std::cout << "created device," << std::endl;
     m_Queue = m_Device.getQueue(0, 0);
 }
 
 void GraphicsContext::createAllocator() {
     VmaAllocatorCreateInfo ci{};
-    ci.flags = VMA_ALLOCATOR_CREATE_KHR_DEDICATED_ALLOCATION_BIT | VMA_ALLOCATOR_CREATE_KHR_BIND_MEMORY2_BIT | VMA_ALLOCATOR_CREATE_KHR_MAINTENANCE4_BIT | VMA_ALLOCATOR_CREATE_KHR_MAINTENANCE5_BIT | VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT | VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT | VMA_ALLOCATOR_CREATE_EXT_MEMORY_PRIORITY_BIT;
+    ci.flags = VMA_ALLOCATOR_CREATE_KHR_DEDICATED_ALLOCATION_BIT | VMA_ALLOCATOR_CREATE_KHR_BIND_MEMORY2_BIT | VMA_ALLOCATOR_CREATE_KHR_MAINTENANCE4_BIT | VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT | VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT | VMA_ALLOCATOR_CREATE_EXT_MEMORY_PRIORITY_BIT;
     ci.vulkanApiVersion = VK_API_VERSION_1_3;
     ci.physicalDevice = m_Gpu;
     ci.device = m_Device;
@@ -309,7 +332,7 @@ void GraphicsContext::saveBufferImage(const std::string &path, const Buffer &buf
 }
 
 void GraphicsContext::saveImage(const std::string &path, const void *data, int width, int height, int channels, int bpp) {
-    stbi_write_png(path.c_str(), width, height, channels, data, bpp);
+    stbi_write_png(path.c_str(), width, height, channels, data, 0);
 }
 
 std::vector<uint32_t> GraphicsContext::compileShader(const std::string &path) const {

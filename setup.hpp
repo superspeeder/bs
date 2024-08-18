@@ -9,6 +9,27 @@
 #include <array>
 #include <string>
 
+#if __has_include("unistd.h")
+#include <unistd.h>
+#else
+#include <chrono>
+#include <thread>
+inline void sleep(int seconds) {
+    using clock = std::chrono::system_clock;
+    using time_point = std::chrono::time_point<clock>;
+    using duration = std::chrono::duration<double>;
+
+    time_point now = clock::now();
+
+    duration dur = duration(seconds);
+
+    while ((clock::now() - now) < dur) {
+        std::this_thread::yield();
+    }
+}
+
+#endif
+
 vk::Instance createInstance();
 void printGpuInfo(size_t& i, vk::PhysicalDevice gpu);
 

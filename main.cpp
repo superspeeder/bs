@@ -8,27 +8,48 @@
 #include <vector>
 #include <array>
 
-#if __has_include("unistd.h")
-#include <unistd.h>
-#else
-#include <chrono>
-void sleep(int seconds) {
-    using clock = std::chrono::system_clock;
-    using time_point = std::chrono::time_point<clock>;
-    using duration = std::chrono::duration<double>;
+#include <fstream>
 
-    time_point now = clock::now();
+#define IMAGE_SIZE 8192
 
-    duration dur = duration(seconds);
+#if defined(WIN32) && defined(RENDERDOC)
+#include "renderdoc_app.h"
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
 
-    while ((clock::now() - now) < dur) {
-        std::this_thread::yield();
+RENDERDOC_API_1_3_0 *rdoc_api = nullptr;
+
+void setup_renderdoc_support() {
+    std::cout << "Starting setup" << std::endl;
+    HMODULE renderdoc = GetModuleHandleW(L"renderdoc.dll");
+    if (renderdoc != nullptr) {
+        pRENDERDOC_GetAPI RENDERDOC_GetAPI = (pRENDERDOC_GetAPI)GetProcAddress(renderdoc, "RENDERDOC_GetAPI");
+        int ret = RENDERDOC_GetAPI(eRENDERDOC_API_Version_1_3_0, (void**)&rdoc_api);
+        if (ret != 1) {
+            std::cout << "Fuck" <<std::endl;
+            sleep(10);
+        }
+
+        assert(ret == 1);
+        std::cout << "Found renderdoc" << std::endl;
+    } else {
+        std::cout << "Not in renderdoc" << std::endl;
     }
 }
 
+#else
+void setup_renderdoc_support(){}
 #endif
 
-#define IMAGE_SIZE 2048
+void startRenderDocFrame() {
+    std::cout << "Starting frame capture" << std::endl;
+    if (rdoc_api) rdoc_api->StartFrameCapture(nullptr, nullptr);
+    std::cout << "Started frame capture" << std::endl;
+}
+
+void endRenderDocFrame() {
+    if (rdoc_api) rdoc_api->EndFrameCapture(nullptr, nullptr);
+}
 
 vk::RenderPass createRenderPass(GraphicsContext* gc) {
 
@@ -124,8 +145,10 @@ void doGpuThings(int i, vk::Instance instance, vk::PhysicalDevice gpu) {
     // create a logical device
 
     auto* gc = new GraphicsContext(instance, gpu);
+    std::cout << "Created gc" << std::endl;
+    startRenderDocFrame();
 
-    Image hostImage = gc->createImageHost(IMAGE_SIZE, IMAGE_SIZE, vk::Format::eR8G8B8A8Unorm, vk::ImageLayout::eUndefined, vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc, vk::ImageTiling::eLinear);
+    Image hostImage = gc->createImageHost(IMAGE_SIZE, IMAGE_SIZE, vk::Format::eR8G8B8A8Unorm, vk::ImageLayout::eUndefined, vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eColorAttachment, vk::ImageTiling::eLinear, true);
     Image deviceImage = gc->createImageDevice(IMAGE_SIZE, IMAGE_SIZE, vk::Format::eR8G8B8A8Unorm, vk::ImageLayout::eUndefined, vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst, vk::ImageTiling::eOptimal);
     Buffer hostBuffer = gc->createBufferHost(IMAGE_SIZE * IMAGE_SIZE * 4, vk::BufferUsageFlagBits::eTransferDst);
 
@@ -139,13 +162,14 @@ void doGpuThings(int i, vk::Instance instance, vk::PhysicalDevice gpu) {
     vk::ImageView imageView = gc->createImageView(deviceImage, vk::Format::eR8G8B8A8Unorm);
     vk::Framebuffer framebuffer = gc->createFramebuffer(renderPass, imageView, {IMAGE_SIZE, IMAGE_SIZE});
 
+    std::cout << "Begin" << std::endl;
     gc->runCommands([&](const vk::CommandBuffer& cmd) {
         vk::ClearColorValue clearColor;
         switch (i) {
-        case 0:
+        case 1:
             clearColor = vk::ClearColorValue(1.0f, 0.0f, 0.0f, 1.0f);
             break;
-        case 1:
+        case 0:
             clearColor = vk::ClearColorValue(0.0f, 1.0f, 0.0f, 1.0f);
             break;
         case 2:
@@ -166,6 +190,8 @@ void doGpuThings(int i, vk::Instance instance, vk::PhysicalDevice gpu) {
         cmd.draw(3, 1, 0, 0);
         cmd.endRenderPass();
     });
+
+    std::cout << "Render done" << std::endl;
 
     gc->runCommands([&](const vk::CommandBuffer& cmd) {
         vk::ImageMemoryBarrier imb{};
@@ -211,7 +237,16 @@ void doGpuThings(int i, vk::Instance instance, vk::PhysicalDevice gpu) {
     ss << "test" << i << ".png";
     std::string path = ss.str();
 
+    gc->getDevice().waitIdle();
+
+//    void* mapped = gc->mapBuffer(hostBuffer);
+//    std::ofstream fi("out.hex", std::ios::binary | std::ios::out);
+//    fi.write((const char*)mapped, IMAGE_SIZE * IMAGE_SIZE * 4);
+//    fi.close();
+//    gc->unmapBuffer(hostBuffer);
+
     gc->saveBufferImage(path, hostBuffer, IMAGE_SIZE, IMAGE_SIZE, 4, 4);
+    endRenderDocFrame();
 
     std::cout << "Done\n";
 
@@ -235,6 +270,7 @@ int main() {
     std::cout << "Hello!" << std::endl;
 
     auto instance = createInstance();
+    setup_renderdoc_support();
 
     std::vector<std::thread> threads;
 

@@ -21,3 +21,8 @@ add_executable(testpr main.cpp
         setup.hpp)
 target_include_directories(testpr PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(testpr Vulkan::Vulkan ${SHADERC_LIB})
+
+option(RENDERDOC "Enable renderdoc support" OFF)
+if (RENDERDOC)
+    target_compile_definitions(testpr PRIVATE -DRENDERDOC)
+endif()
