@@ -165,6 +165,8 @@ ImageAlloc createImageDevice(VmaAllocator allocator, uint32_t width, uint32_t he
     return alloc;
 }
 
+void createRenderPass(vk::Device device) {
+}
 
 
 void doGpuThings(int i, vk::Instance instance, vk::PhysicalDevice gpu) {
@@ -199,7 +201,24 @@ void doGpuThings(int i, vk::Instance instance, vk::PhysicalDevice gpu) {
     cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eTransfer, {}, {}, {}, imb1);
 
     vk::ImageSubresourceRange range = vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
-    vk::ClearColorValue clearColor = vk::ClearColorValue(1.0f, 0.0f, 0.0f, 1.0f);
+    vk::ClearColorValue clearColor;
+    switch (i) {
+        case 0:
+            clearColor = vk::ClearColorValue(1.0f, 0.0f, 0.0f, 1.0f);
+            break;
+        case 1:
+            clearColor = vk::ClearColorValue(0.0f, 1.0f, 0.0f, 1.0f);
+            break;
+        case 2:
+            clearColor = vk::ClearColorValue(0.0f, 0.0f, 1.0f, 1.0f);
+            break;
+        case 3:
+            clearColor = vk::ClearColorValue(1.0f, 0.0f, 1.0f, 1.0f);
+            break;
+        default:
+            clearColor = vk::ClearColorValue(1.0f, 1.0f, 0.0f, 1.0f);
+            break;
+    }
 
     cmd.clearColorImage(deviceImage.image, vk::ImageLayout::eTransferDstOptimal, clearColor, range);
 
@@ -253,16 +272,21 @@ void doGpuThings(int i, vk::Instance instance, vk::PhysicalDevice gpu) {
 
     std::cout << "map: " << (size_t)map << std::endl;
 
-    std::string s = "test" + std::to_string(i) + ".png";
-    stbi_write_png(s.c_str(), IMAGE_SIZE, IMAGE_SIZE, 4, map, 4);
-    std::cout << "Wrote\n";
-
+    void* data = malloc(IMAGE_SIZE * IMAGE_SIZE * 4);
+    memcpy(data, map, IMAGE_SIZE * IMAGE_SIZE * 4);
     vmaUnmapMemory(allocator, hostImage.alloc);
+
+    std::string s = "test" + std::to_string(i) + ".png";
+    stbi_write_png(s.c_str(), IMAGE_SIZE, IMAGE_SIZE, 4, data, 4);
+    std::cout << "Wrote\n";
+    
+    free(data);
 
     std::cout << "Done\n";
 
     // sleep(15);
 
+    device.destroy(pool);
     device.destroy(deviceImage.image);
     device.destroy(hostImage.image);
     device.destroy(fence);
